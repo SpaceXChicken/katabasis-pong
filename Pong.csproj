@@ -1,0 +1,36 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+	<!-- MSBuild project settings -->
+	<PropertyGroup>
+		<TargetFramework>net6.0</TargetFramework>
+		<OutputType>Exe</OutputType>
+		<PublishReadyToRun>false</PublishReadyToRun>
+		<TieredCompilation>false</TieredCompilation>
+		<AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+		<GenerateTargetFrameworkAttribute>false</GenerateTargetFrameworkAttribute>
+		<GenerateAssemblyInfo>false</GenerateAssemblyInfo>
+	</PropertyGroup>
+
+	<!-- Custom project settings -->
+	<PropertyGroup>
+		<EnableCodeCoverage>false</EnableCodeCoverage>
+		<EnableAnalyzers>true</EnableAnalyzers>
+		<IncludeAnalyzersStyleCop>true</IncludeAnalyzersStyleCop>
+	</PropertyGroup>
+
+	<!-- Project references -->
+	<ItemGroup>
+		<ProjectReference Include="$(GitRepositoryPath)\src\cs\production\Katabasis.Framework\Katabasis.Framework.csproj" />
+	</ItemGroup>
+
+	<!-- Copy assets to output-->
+	<ItemGroup>
+		<Content Include="Assets\**">
+			<CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+		</Content>
+	</ItemGroup>
+	<ItemGroup>
+	  <Folder Include="Properties\" />
+	</ItemGroup>
+
+</Project>
