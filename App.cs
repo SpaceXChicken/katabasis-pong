@@ -9,6 +9,12 @@ using System.Text;
 using Katabasis;
 using Katabasis.ImGui;
 
+//Two paddles, one Player controlled and one AI controlled.
+//A way to go back to the main menu from the gameplay screen
+//A way to restart the gameplay screen from zero (ie: no points)
+//A way to tell the users who won. 
+//A way to play sounds to provide feedback.
+
 namespace Pong
 {
 	public class App : Game
@@ -18,37 +24,35 @@ namespace Pong
 		ImGuiRenderer ImGuiRenderer;
 		public enum GameState
 		{
-			StartUpSequence = 0,
+			Start = 0,
 			Title = 1,
 			Game = 2
 		}
 		public static GameState State;
 		
 		// Menu
-		private double introTimer = 0f;
-		private float introTextScale = 10f;
-		private bool startIntro = false;
 		private Vector2 WindowCentre;
-		private Vector2 IntroText;
-		private Rectangle centredRectTexture;
-		private enum SelectScreen
-		{
-			None = 0,
-			First = 1,
-			Second = 2,
-		}
-		private SelectScreen selected = SelectScreen.None;
+		private float titleTextScale = 10f;
+		private int textBoxScale = 5;
+		private Dictionary<string, Rectangle> titleTextBoxes = new Dictionary<string, Rectangle>();
+		private Dictionary<string, Rectangle> gameTextBoxes = new Dictionary<string, Rectangle>();
+		string[] gameMenu = { "Quit to Title", "Quit to Desktop" };
+		string[] titleMenu = { "Single-player", "Two-player" };
+		private int chosenOption = 0;
+		private double introTimer = 0;
+		private bool startIntro = false;
 		
 		// Game
-		private bool twoPlayer = false;
+		private bool twoPlayer = true;
 		private bool disableMovement = false;
 		private bool gamePaused = false;
 		private bool inGameMenu = false;
-		private bool gameOver = false;
+		private double timer = 0f;
 
 		// AI
-		private float aiNextPosY;
-		private bool moveComplete;
+		private float? aiNextPosY;
+		private float? aiTimeToNextPos;
+		private float aiTimer;
 		private Random random = new Random();
 		private int randomOffset;
 
@@ -63,7 +67,9 @@ namespace Pong
 		{
 			public int score = 0;
 			public float curSpeed = 0;
-			
+
+			private GameWindow winBounds;
+
 			private float pX;
 			public int X
 			{
@@ -90,14 +96,27 @@ namespace Pong
 			}
 			public Vector2 Velocity()
 			{
-				return new Vector2(0, curSpeed);
+				return new Vector2(curSpeed - Math.Sign(curSpeed) * 50, curSpeed - Math.Sign(curSpeed) * 50);
 			}
 			public Rectangle Bounds()
 			{
 				return new Rectangle(X, Y, paddleWidth, paddleHeight);
 			}
+
+			public void AccelerateBy(int accel, GameTime gameTime)
+			{
+				if ((pY == 1 && accel < 0) || (pY == winBounds.ClientBounds.Height - 1 - paddleHeight && accel > 0))
+				{
+					accel = 0;
+					curSpeed = 0;
+				}
+				if (Math.Sign(accel) != Math.Sign(curSpeed)) { curSpeed = Math.Sign(accel) * 50; }
+				curSpeed += accel * (float)gameTime.ElapsedGameTime.TotalSeconds;
+			}
 			public void Update(GameTime gameTime, GameWindow Window)
 			{
+				winBounds = Window;
+
 				if (pY + paddleHeight < Window.ClientBounds.Height - 1 && pY > 1)
 				{
 					pY += curSpeed * (float)gameTime.ElapsedGameTime.TotalSeconds;
@@ -155,6 +174,7 @@ namespace Pong
 		
 		// Ball
 		private static int ballLength = 4;
+		private static int minSpeedX = 100;
 		private class Ball
 		{
 			public Vector2 position = new Vector2(100, 100);
@@ -165,19 +185,23 @@ namespace Pong
 			}
 			public void Update(GameTime gameTime)
 			{
+				var minVelocity = minSpeedX * Math.Sign(velocity.X);
+				if (Math.Abs(velocity.X) < minSpeedX)
+				{
+					velocity.X = minVelocity;
+				}
 				position += velocity * (float)gameTime.ElapsedGameTime.TotalSeconds;
 			}
-			// TODO: a priori calculations
 		}
 		private Ball ball = new Ball();
 		private float collisionTimer = 0f;
 		private float spawnTimer = 0f;
+		private Vector2? storedVelocity;
 		private Tuple<Vector2, float>? nextPredictedPositionData;
 		private Tuple<Vector2, float>? finalPredictedPositionData;
 		private Vector2? positionData;
 		private Vector2? velocityData;
 		private int? verticalCollision;
-		private bool isSpawned = false;
 
 		// Input 
 		private MouseState _currentMouseState;
@@ -217,16 +241,6 @@ namespace Pong
 			// Menu 
 			WindowCentre = new Vector2(Window.ClientBounds.Width / 2, Window.ClientBounds.Height / 2);
 			
-			// Events
-			// Window.ClientSizeChanged += (object? obj, EventArgs args) =>
-			{
-				WindowCentre = new Vector2(Window.ClientBounds.Width / 2, Window.ClientBounds.Height / 2);
-				centredRectTexture.X = (int)WindowCentre.X - centredRectTexture.Width / 2;
-				centredRectTexture.Y = (int)WindowCentre.Y - centredRectTexture.Height / 2;
-			};
-			// OnHit += BounceBall;
-			// OnHit += OnHitAudio;
-
 			PlayerOne = new Player(Window.ClientBounds.Width / 8, Window.ClientBounds.Height / 2 - paddleHeight / 2);
 			PlayerTwo = new Player(Window.ClientBounds.Width * 7 / 8 - paddleWidth, Window.ClientBounds.Height / 2 - paddleHeight / 2);
 			// Because of our eventual superior pre calculations the width of the border doesnt really matter as the ball won't clip through
@@ -235,7 +249,7 @@ namespace Pong
 			leftBorder = new Border(0, 0, 1, Window.ClientBounds.Height);
 			rightBorder = new Border(Window.ClientBounds.Width - 1, 0, 1, Window.ClientBounds.Height);
 			ball.position = WindowCentre;
-			ball.velocity = new Vector2(100, -100);
+			ball.velocity = new Vector2(200, -150);
 			base.Initialize();
 		}
 
@@ -243,11 +257,6 @@ namespace Pong
 		{
 			LoadSpriteFonts();
 			LoadTextures();
-			
-			// Texture Related Variables
-			centredRectTexture = new Rectangle((int)WindowCentre.X - rectTexture.Width * 5 / 2, (int)WindowCentre.Y - rectTexture.Height * 5 / 2,
-			rectTexture.Width * 5, rectTexture.Height * 5);		
-			IntroText = -spriteFont.MeasureString("Pong") * introTextScale / 2;
 		}
 		
 		#region ContentHelpers
@@ -274,9 +283,19 @@ namespace Pong
 		protected override void Update(GameTime gameTime)
 		{
 			HandleInput();
-			
-			if (State == GameState.Game)
-			{ UpdateGame(gameTime); }
+
+			switch (State)
+			{
+				case GameState.Game:
+					UpdateGame(gameTime);
+					break;
+				case GameState.Title:
+					UpdateTitle(gameTime);
+					break;
+				case GameState.Start:
+					UpdateStart(gameTime);
+					break;
+			}
 		}
 
 		protected override void Draw(GameTime gameTime)
@@ -285,20 +304,140 @@ namespace Pong
 			
 			SpriteBatch.Begin(SpriteSortMode.Deferred, BlendState.AlphaBlend, SamplerState.PointClamp,
 			DepthStencilState.Default, RasterizerState.CullNone);
-			
-			if (State == GameState.StartUpSequence)
-			{ DrawIntro(gameTime); }
-			else if (State == GameState.Title)
-			{ DrawTitle(gameTime); }
-			else if (State == GameState.Game)
-			{ DrawGame(gameTime); }
-			
+
+			switch (State)
+			{
+				case GameState.Game:
+					DrawGame(gameTime);
+					break;
+				case GameState.Title:
+					DrawTitle();
+					break;
+				case GameState.Start:
+					DrawStart();
+					break;
+			}
+
 			SpriteBatch.End();
 		}
 
+		private void UpdateStart(GameTime gameTime)
+		{
+			if (KeyPressed(Keys.Space))
+			{
+				startIntro = true;
+				introTimer = 0f;
+			}
+			if (startIntro)
+			{
+				introTimer += gameTime.ElapsedGameTime.TotalSeconds;
+			}
+			if (introTimer > 1)
+			{
+				State = GameState.Title;
+				startIntro = false;
+				introTimer = 0;
+			}
+		}
+
+		private void DrawStart()
+		{
+			if (!startIntro)
+			{
+				SpriteBatch.DrawString(orangeFont, "Pong", WindowCentre - new Vector2(orangeFont.MeasureString("Pong").X, orangeFont.MeasureString("Pong").Y - 7) * 5, Color.White, 0f, Vector2.Zero, 10f, 0, 0f);
+			}
+		}
+		private void DrawTitle()
+		{
+			var textBoxDimensions = new Rectangle(0, 0, rectTexture.Width * textBoxScale, rectTexture.Height * textBoxScale);
+
+			int spacing = textBoxDimensions.Height / 2;
+
+			float startHeight = WindowCentre.Y - textBoxDimensions.Height * titleMenu.Length / 2 - spacing * (titleMenu.Length - 1) / 2;
+
+			foreach (var item in titleMenu)
+			{
+				titleTextBoxes[item] = new Rectangle((int)WindowCentre.X - textBoxDimensions.Width / 2, (int)startHeight, textBoxDimensions.Width, textBoxDimensions.Height);
+				startHeight += textBoxDimensions.Height + spacing;
+			}
+
+			var selectCounter = 0;
+
+			foreach (var item in titleTextBoxes)
+			{
+				var textBuffer = 20;
+				var stringSize = orangeFont.MeasureString(item.Key);
+				var textScale = (textBoxDimensions.Width - textBuffer * 2) / stringSize.X;
+
+				if (selectCounter == chosenOption % titleMenu.Length)
+				{
+					textBuffer -= (int)(stringSize.X * textScale * 0.1f / 2);
+					textScale *= 1.1f;
+					var scaledDimensions = new Vector2((int)(item.Value.Width * 1.1f), (int)(item.Value.Height * 1.1f));
+					SpriteBatch.Draw(rectTexture, new Rectangle(item.Value.X - ((int)scaledDimensions.X - item.Value.Width) / 2, item.Value.Y - ((int)scaledDimensions.Y - item.Value.Height) / 2, (int)scaledDimensions.X, (int)scaledDimensions.Y), Color.BurlyWood);
+					SpriteBatch.DrawString(orangeFont, item.Key, new Vector2(item.Value.X + textBuffer, (item.Value.Y + item.Value.Height / 2 + 7 * textScale) - stringSize.Y * textScale / 2), Color.White, 0f, Vector2.Zero, textScale, 0, 0f);
+				}
+				else
+				{
+					SpriteBatch.Draw(rectTexture, item.Value, Color.Wheat);
+					SpriteBatch.DrawString(spriteFont, item.Key, new Vector2(item.Value.X + textBuffer, (item.Value.Y + item.Value.Height / 2 + 7 * textScale) - stringSize.Y * textScale / 2), Color.White, 0f, Vector2.Zero, textScale, 0, 0f);
+				}
+
+				selectCounter++;
+			}
+		}
+		private void UpdateTitle(GameTime gameTime)
+		{
+			if (KeyPressed(Keys.Up) || KeyPressed(Keys.Down))
+			{
+				chosenOption++;
+			}
+
+			if (KeyPressed(Keys.Escape))
+			{
+				State = GameState.Start;
+			}
+
+			if (KeyPressed(Keys.Space))
+			{
+				switch (chosenOption % gameMenu.Length)
+				{
+					case 0:
+						State = GameState.Game;
+						twoPlayer = false;
+						ResetGame();
+						break;
+					case 1:
+						State = GameState.Game;
+						twoPlayer = true;
+						ResetGame();
+						break;
+				}
+			}
+		}
+
+		private void ResetGame()
+		{
+			PlayerOne = new Player(Window.ClientBounds.Width / 8, Window.ClientBounds.Height / 2 - paddleHeight / 2);
+			PlayerTwo = new Player(Window.ClientBounds.Width * 7 / 8 - paddleWidth, Window.ClientBounds.Height / 2 - paddleHeight / 2);
+			ball.position = WindowCentre;
+			ball.velocity = new Vector2(200, -150);
+			collisionTimer = 0f;
+			spawnTimer = 0f;
+			storedVelocity = null;
+			nextPredictedPositionData = null;
+			finalPredictedPositionData = null;
+			positionData = null;
+			velocityData = null;
+			verticalCollision = null;
+			aiNextPosY = null;
+			aiTimeToNextPos = null;
+			aiTimer = 0f;
+			randomOffset = random.Next(12);
+		}
 		private void BounceBall(Vector2 colliderVelocity, bool verticalCollision = false)
 		{
-			bool toPlayerTwo = Math.Sign(ball.velocity.X) == 1; // Is this more readable?
+			bool toPlayerTwo = ball.velocity.X > 0; 
 			// We'll add the players' velocity to the ball to make it more exciting.
 			if (verticalCollision)
 			{
@@ -307,6 +446,15 @@ namespace Pong
 			else if ( (toPlayerTwo && InRange(ball.position.Y, PlayerTwo.Y, PlayerTwo.Y + paddleHeight)) || (!toPlayerTwo && InRange(ball.position.Y, PlayerOne.Y, PlayerOne.Y + paddleHeight)) )
 			{
 				ball.velocity = new Vector2(-ball.velocity.X, ball.velocity.Y) + colliderVelocity;
+
+				// AI
+				if (!toPlayerTwo)
+				{
+					aiNextPosY = null;
+					aiTimeToNextPos = null;
+					aiTimer = 0f;
+					randomOffset = random.Next(paddleHeight + 14);
+				}
 			}
 		}
 
@@ -321,7 +469,6 @@ namespace Pong
 			{
 				UpdateCollisions(gameTime);
 				UpdateMovement(gameTime);
-				UpdateScore(gameTime);
 			}
 			UpdateMenu();
 		}
@@ -330,8 +477,35 @@ namespace Pong
 			if (_previousKeyboardState.IsKeyDown(Keys.Escape) && _currentKeyboardState.IsKeyUp(Keys.Escape)) 
 			{
 				if (inGameMenu) { CloseMenu(); } else { OpenMenu(); }
-			}
 
+				chosenOption = 0;
+			}
+			if (inGameMenu)
+			{
+				if (KeyPressed(Keys.Up) || KeyPressed(Keys.Down))
+				{
+					chosenOption++;
+				}
+
+				if (KeyPressed(Keys.Space))
+				{
+					switch (chosenOption % gameMenu.Length)
+					{
+						case 0:
+							State = GameState.Title;
+							CloseMenu();
+							break;
+						case 1:
+							Exit();
+							break;
+					}
+				}
+			}
+		}
+
+		private bool KeyPressed(Keys key)
+		{
+			return _previousKeyboardState.IsKeyDown(key) && _currentKeyboardState.IsKeyUp(key);
 		}
 		private void UpdateMovement(GameTime gameTime)
 		{
@@ -343,23 +517,15 @@ namespace Pong
 
 				if (_previousKeyboardState.IsKeyDown(Keys.R) && _currentKeyboardState.IsKeyUp(Keys.R))
 				{
-					ball.position = WindowCentre;
+					Console.WriteLine(ball.velocity);
 				}
 				if (_currentKeyboardState.IsKeyDown(Keys.W))
 				{
-					if (PlayerOne.curSpeed > 0)
-					{
-						PlayerOne.curSpeed = 0;
-					}
-					PlayerOne.curSpeed -= accel * (float)gameTime.ElapsedGameTime.TotalSeconds;
+					PlayerOne.AccelerateBy(-accel, gameTime);
 				}
 				else if (_currentKeyboardState.IsKeyDown(Keys.S))
 				{
-					if (PlayerOne.curSpeed < 0)
-					{
-						PlayerOne.curSpeed = 0;
-					}
-					PlayerOne.curSpeed += accel * (float)gameTime.ElapsedGameTime.TotalSeconds;
+					PlayerOne.AccelerateBy(accel, gameTime);
 				}
 				else
 				{
@@ -369,19 +535,11 @@ namespace Pong
 				{
 					if (_currentKeyboardState.IsKeyDown(Keys.Up))
 					{
-						if (PlayerTwo.curSpeed > 0)
-						{
-							PlayerTwo.curSpeed = 0;
-						}
-						PlayerTwo.curSpeed -= accel * (float)gameTime.ElapsedGameTime.TotalSeconds;
+						PlayerTwo.AccelerateBy(-accel, gameTime);
 					}
 					else if (_currentKeyboardState.IsKeyDown(Keys.Down))
 					{
-						if (PlayerTwo.curSpeed < 0)
-						{
-							PlayerTwo.curSpeed = 0;
-						}
-						PlayerTwo.curSpeed += accel * (float)gameTime.ElapsedGameTime.TotalSeconds;
+						PlayerTwo.AccelerateBy(accel, gameTime);
 					}
 					else
 					{
@@ -390,37 +548,33 @@ namespace Pong
 				}
 				else
 				{
-					AIMove(gameTime, aiNextPosY);
+					AIMove(gameTime, PredictFinalBallPositionOnPlayerAxis().Item1.Y);
 				}
 			}
 		}
 
 		private void AIMove(GameTime gameTime, float y)
 		{
-			// Yes, its not DRY.
+			// s = ut + 0.5at^2  - > 2s/a = t^2
 			var aiPos = PlayerTwo.Y;
-			y -= paddleHeight / 2;
+			aiNextPosY ??= y - 14 + randomOffset;
 
-			if (InRange(aiNextPosY, y + randomOffset - 8, y + randomOffset + 8) || InRange(aiNextPosY, y - randomOffset - 8, y - randomOffset + 8))
+			float s = (float)aiNextPosY - aiPos;
+			float acc = s > 0 ? accel : -accel;
+			float time = (float)Math.Sqrt(Math.Abs(2 * s / accel));
+
+			aiTimeToNextPos ??= time;
+			aiTimer += (float)gameTime.ElapsedGameTime.TotalSeconds;
+
+			if (aiTimer < aiTimeToNextPos)
 			{
-				PlayerTwo.curSpeed = 0;
+				PlayerTwo.curSpeed += acc * (float)gameTime.ElapsedGameTime.TotalSeconds;
 			}
-			else if (aiPos < y)
+			else
 			{
-				if (PlayerTwo.curSpeed < 0)
-				{
-					PlayerTwo.curSpeed = 0;
-				}
-				PlayerTwo.curSpeed += accel * (float)gameTime.ElapsedGameTime.TotalSeconds;
+				PlayerTwo.curSpeed = 0f;
 			}
-			else if (aiPos > y)
-			{
-				if (PlayerTwo.curSpeed > 0)
-				{
-					PlayerTwo.curSpeed = 0;
-				}
-				PlayerTwo.curSpeed -= accel * (float)gameTime.ElapsedGameTime.TotalSeconds;
-			}
+
 		}
 		private void UpdateCollisions(GameTime gameTime)
 		{
@@ -431,31 +585,41 @@ namespace Pong
 		{
 			nextPredictedPositionData ??= PredictBallPositionOnPlayerAxis();
 			verticalCollision ??= 0;
+
 			if (nextPredictedPositionData.Item1.Y < 0 || nextPredictedPositionData.Item1.Y > Window.ClientBounds.Height)
 			{
 				nextPredictedPositionData = PredictBallPositionOnBorderAxis();
 				verticalCollision = 1;
 			}
+
+			if (ball.position.X < 0 || ball.position.X > Window.ClientBounds.Width)
+			{
+				if (ball.velocity.X > 0)
+				{
+					aiNextPosY = null;
+					aiTimeToNextPos = null;
+					aiTimer = 0f;
+					randomOffset = random.Next(paddleHeight + 14);
+					if (spawnTimer == 0f)
+					{
+						PlayerTwo.score++;
+					};
+				}
+				else if (spawnTimer == 0f)
+				{
+					PlayerOne.score++;
+				}
+				SpawnBall(gameTime);
+			}
+
 			collisionTimer += (float)gameTime.ElapsedGameTime.TotalSeconds;
+
 			if(collisionTimer > nextPredictedPositionData.Item2)
 			{
-				if (ball.position.X < 0 || ball.position.X > Window.ClientBounds.Width)
-				{
-					ball.position = WindowCentre;
-				}
-				else if(nextPredictedPositionData.Item2 > 0) // Basically so it doesnt bounce after it has passed the paddle
+				if(nextPredictedPositionData.Item2 > 0) // Basically so it doesnt bounce after it has passed the paddle
 				{
 					BounceBall(verticalCollision == 1 ? Vector2.Zero : ball.velocity.X > 0 ? PlayerTwo.Velocity() : PlayerOne.Velocity(), verticalCollision == 1);
-					if (ball.velocity.X > 0)
-					{
-						aiNextPosY = PredictFinalBallPositionOnPlayerAxis().Item1.Y;
-						Console.WriteLine("Updated");
-					}
-					else
-					{
-						randomOffset = random.Next(32);
-						Console.WriteLine(randomOffset);
-					}
+					ball.position = nextPredictedPositionData.Item1; // This is required to make the bounce appear as accurate as possible to the predicted/real data
 				}
 				nextPredictedPositionData = null;
 				verticalCollision = null;
@@ -539,6 +703,7 @@ namespace Pong
 			{
 				return playerPos;
 			}
+
 			while (true)
 			{
 				var nextBounce = PredictBallPositionOnBorderAxis(positionData.Value, velocityData.Value);
@@ -561,21 +726,77 @@ namespace Pong
 			}
 		}
 
+		private List<Vector2> AllBouncePoints(Vector2 position = default, Vector2 velocity = default)
+		{
+			if (position == default) { position = ball.position; velocity = ball.velocity; }
+
+			var borderPos = PredictBallPositionOnBorderAxis(position, velocity);
+			var playerPos = PredictBallPositionOnPlayerAxis(position, velocity);
+
+			List<Vector2> list = new List<Vector2>();
+
+			if (InRange(borderPos.Item1.X, 0, Window.ClientBounds.Width))
+			{
+				finalPredictedPositionData ??= borderPos;
+				positionData ??= position;
+				velocityData ??= velocity;
+			}
+
+			while (true)
+			{
+				var nextBounce = PredictBallPositionOnBorderAxis(positionData.Value, velocityData.Value);
+				if (InRange(nextBounce.Item1.X, PlayerOne.X + paddleWidth, PlayerTwo.X))
+				{
+					positionData = nextBounce.Item1;
+					velocityData = new Vector2(velocityData.Value.X, -velocityData.Value.Y);
+					list.Add((Vector2)positionData);
+					continue;
+				}
+				else
+				{
+					var copy1 = positionData.Value;
+					var copy2 = velocityData.Value;
+					finalPredictedPositionData = null;
+					positionData = null;
+					velocityData = null;
+					return list;
+				}
+
+			}
+		}
+
 		private void SpawnBall(GameTime gameTime)
 		{
-			ball.position = WindowCentre;
+			storedVelocity ??= ball.velocity;
+
+			ball.position = new Vector2(807, 118); // Apparently negative values break this function.
+			ball.velocity = Vector2.Zero;
+			spawnTimer += (float)gameTime.ElapsedGameTime.TotalSeconds;
+
+			if (spawnTimer > 1)
+			{
+				spawnTimer = 0f;
+				ball.position = WindowCentre;
+				ball.velocity = storedVelocity.Value;
+				storedVelocity = null;
+			}
 		}
 		private void GameOver(GameTime gameTime)
 		{
 			disableMovement = true;
-			introTimer += gameTime.ElapsedGameTime.TotalSeconds;
-			if ((int)introTimer % 2 == 0)
+			timer += gameTime.ElapsedGameTime.TotalSeconds;
+			ball.position = new Vector2(1000, 100);
+			if ((int)timer % 2 == 0)
 			{
-				SpriteBatch.DrawString(orangeFont, "Game Over", WindowCentre - new Vector2(orangeFont.MeasureString("Game Over").X, -orangeFont.MeasureString("Game Over").Y) * introTextScale / 2, Color.White, 0f, Vector2.Zero, introTextScale, SpriteEffects.None, 0f);
+				SpriteBatch.DrawString(orangeFont, "Game Over", WindowCentre - new Vector2(orangeFont.MeasureString("Game Over").X, -orangeFont.MeasureString("Game Over").Y) * titleTextScale / 2, Color.White, 0f, Vector2.Zero, titleTextScale, SpriteEffects.None, 0f);
 			}
 			if (_previousKeyboardState.IsKeyDown(Keys.Space) && _currentKeyboardState.IsKeyUp(Keys.Space))
 			{
 				Exit();
+			}
+			if (_previousKeyboardState.IsKeyDown(Keys.Escape) && _currentKeyboardState.IsKeyUp(Keys.Escape))
+			{
+				State = GameState.Title;
 			}
 		}
 		private void DrawGame(GameTime gameTime)
@@ -588,8 +809,6 @@ namespace Pong
 			SpriteBatch.Draw(rectTexture, leftBorder.Bounds(), Color.Black);
 			SpriteBatch.Draw(rectTexture, rightBorder.Bounds(), Color.Black);
 			SpriteBatch.Draw(ballTexture, ball.position, Color.White);
-			SpriteBatch.Draw(ballTexture, PredictBallPositionOnBorderAxis().Item1, Color.Red);
-			SpriteBatch.Draw(ballTexture, PredictBallPositionOnPlayerAxis().Item1, Color.Blue);
 
 			SpriteBatch.Draw(ballTexture, PredictFinalBallPositionOnPlayerAxis().Item1, Color.Purple);
 
@@ -601,94 +820,41 @@ namespace Pong
 		}
 		private void DrawInGameMenu(GameTime gameTime)
 		{
-			// TODO: Height size of capitals.
-			var text1 = "Restart Game";
-			var text2 = "Quit to Title";
-			var text3 = "Quit to Desktop";
+			var textBoxDimensions = new Rectangle(0, 0, rectTexture.Width * textBoxScale, rectTexture.Height * textBoxScale);
 
-			// Centre text2
-			var textRect = centredRectTexture;
-			SpriteBatch.Draw(rectTexture, textRect, selected.Equals(SelectScreen.First) ? Color.BurlyWood : Color.Wheat);
-			var stringSize = spriteFont.MeasureString(text2);
-			var scale = (centredRectTexture.Width - 20) / stringSize.X;
-			SpriteBatch.DrawString(selected.Equals(SelectScreen.First) ? orangeFont : spriteFont, text2,
-				new Vector2(textRect.X + 10, textRect.Y + textRect.Height / 2),
-				Color.White, 0f, Vector2.Zero, scale, SpriteEffects.None, 0f);
-			
-			// Add text1 on top
-			textRect = centredRectTexture;
-			textRect.Y -= (int)(centredRectTexture.Height * 1.5);
-			SpriteBatch.Draw(rectTexture, textRect, selected.Equals(SelectScreen.None) ? Color.BurlyWood : Color.Wheat);
-			stringSize = spriteFont.MeasureString(text1);
-			scale = (centredRectTexture.Width - 20) / stringSize.X;
-			SpriteBatch.DrawString(selected.Equals(SelectScreen.None) ? orangeFont : spriteFont, text1,
-				new Vector2(textRect.X + 10, textRect.Y + textRect.Height / 2),
-				Color.White, 0f, Vector2.Zero, scale, SpriteEffects.None, 0f);
+			int spacing = textBoxDimensions.Height / 2;
 
-			// Add text3 below
-			textRect = centredRectTexture;
-			textRect.Y += (int)(centredRectTexture.Height * 1.5);
-			SpriteBatch.Draw(rectTexture, textRect, selected.Equals(SelectScreen.Second) ? Color.BurlyWood : Color.Wheat);
-			stringSize = spriteFont.MeasureString(text3);
-			scale = (centredRectTexture.Width - 20) / stringSize.X;
-			SpriteBatch.DrawString(selected.Equals(SelectScreen.Second) ? orangeFont : spriteFont, text3,
-				new Vector2(textRect.X + 10, textRect.Y + textRect.Height / 2),
-				Color.White, 0f, Vector2.Zero, scale, SpriteEffects.None, 0f);
+			float startHeight = WindowCentre.Y - textBoxDimensions.Height * gameMenu.Length / 2 - spacing * (gameMenu.Length - 1) / 2;
 
-			if (_previousKeyboardState.IsKeyDown(Keys.Up) && _currentKeyboardState.IsKeyUp(Keys.Up))
+			foreach (var item in gameMenu)
 			{
-				switch (selected)
-				{
-					case SelectScreen.None:
-						selected = SelectScreen.Second;
-						break;
-					case SelectScreen.First:
-						selected = SelectScreen.None;
-						break;
-					case SelectScreen.Second:
-						selected = SelectScreen.First;
-						break;
-				};
-			}
-			else if (_previousKeyboardState.IsKeyDown(Keys.Down) && _currentKeyboardState.IsKeyUp(Keys.Down))
-			{
-				switch (selected)
-				{
-					case SelectScreen.None:
-						selected = SelectScreen.First;
-						break;
-					case SelectScreen.First:
-						selected = SelectScreen.Second;
-						break;
-					case SelectScreen.Second:
-						selected = SelectScreen.None;
-						break;
-				};
-			}
-			if (_previousKeyboardState.IsKeyDown(Keys.Space) && _currentKeyboardState.IsKeyUp(Keys.Space))
-			{
-				switch (selected)
-				{
-					case SelectScreen.None:
-						ResetGame();
-						CloseMenu();
-						break;
-					case SelectScreen.First:
-						selected = SelectScreen.None;
-						IntroText = -spriteFont.MeasureString("Pong") * introTextScale / 2;
-						startIntro = true;
-						CloseMenu();
-						break;
-					case SelectScreen.Second:
-						selected = SelectScreen.None;
-						Exit();
-						break;
-				};
+				gameTextBoxes[item] = new Rectangle((int)WindowCentre.X - textBoxDimensions.Width / 2, (int)startHeight, textBoxDimensions.Width, textBoxDimensions.Height);
+				startHeight += textBoxDimensions.Height + spacing;
 			}
 
-			if(startIntro)
+			var selectCounter = 0;
+
+			foreach (var item in gameTextBoxes)
 			{
-				if (DrawTitleTransition(gameTime, true)) { State = GameState.Title; startIntro = false; };
+				var textBuffer = 20;
+				var stringSize = orangeFont.MeasureString(item.Key);
+				var textScale = (textBoxDimensions.Width - textBuffer * 2 ) / stringSize.X;
+
+				if (selectCounter == chosenOption % gameMenu.Length)
+				{
+					textBuffer -= (int)(stringSize.X * textScale * 0.1f / 2);
+					textScale *= 1.1f;
+					var scaledDimensions = new Vector2((int)(item.Value.Width * 1.1f), (int)(item.Value.Height * 1.1f));
+					SpriteBatch.Draw(rectTexture, new Rectangle(item.Value.X - ((int)scaledDimensions.X - item.Value.Width) / 2, item.Value.Y - ((int)scaledDimensions.Y - item.Value.Height) / 2, (int)scaledDimensions.X, (int)scaledDimensions.Y), Color.BurlyWood);
+					SpriteBatch.DrawString(orangeFont, item.Key, new Vector2(item.Value.X + textBuffer, (item.Value.Y + item.Value.Height / 2 + 7 * textScale) - stringSize.Y * textScale / 2), Color.White, 0f, Vector2.Zero, textScale, 0, 0f);
+				}
+				else
+				{
+					SpriteBatch.Draw(rectTexture, item.Value, Color.Wheat);
+					SpriteBatch.DrawString(spriteFont, item.Key, new Vector2(item.Value.X + textBuffer, (item.Value.Y + item.Value.Height / 2 + 7 * textScale) - stringSize.Y * textScale / 2), Color.White, 0f, Vector2.Zero, textScale, 0, 0f);
+				}
+
+				selectCounter++;
 			}
 		}
 
@@ -702,122 +868,11 @@ namespace Pong
 			}
 
 			// Draw player scores
-			var stringSize = spriteFont.MeasureString(PlayerOne.score.ToString()) * introTextScale;
-			SpriteBatch.DrawString(spriteFont, PlayerOne.score.ToString(), new Vector2(Window.ClientBounds.Width / 4 - stringSize.X / 2, stringSize.Y / 4), Color.LightBlue, 0f, Vector2.Zero, introTextScale, SpriteEffects.None, 0f);
+			var stringSize = spriteFont.MeasureString(PlayerOne.score.ToString()) * titleTextScale;
+			SpriteBatch.DrawString(spriteFont, PlayerOne.score.ToString(), new Vector2(Window.ClientBounds.Width / 4 - stringSize.X / 2, stringSize.Y / 4), Color.LightBlue, 0f, Vector2.Zero, titleTextScale, SpriteEffects.None, 0f);
 
-			stringSize = spriteFont.MeasureString(PlayerTwo.score.ToString()) * introTextScale;
-			SpriteBatch.DrawString(spriteFont, PlayerTwo.score.ToString(), new Vector2(Window.ClientBounds.Width / 4 * 3 - stringSize.X / 2, stringSize.Y / 4), Color.Tomato, 0f, Vector2.Zero, introTextScale, SpriteEffects.None, 0f);
-		}
-		private void DrawTitle(GameTime gameTime)
-		{
-			if (_previousKeyboardState.IsKeyDown(Keys.Up) && _currentKeyboardState.IsKeyUp(Keys.Up) || _previousKeyboardState.IsKeyDown(Keys.Down) && _currentKeyboardState.IsKeyUp(Keys.Down))
-			{
-				switch (selected)
-				{
-					case SelectScreen.None:
-						selected = SelectScreen.First;
-						break;
-					case SelectScreen.First:
-						selected = SelectScreen.Second;
-						break;
-					case SelectScreen.Second:
-						selected = SelectScreen.First;
-						break;
-				};
-			}
-			if (_previousKeyboardState.IsKeyDown(Keys.Space) && _currentKeyboardState.IsKeyUp(Keys.Space))
-			{
-				switch (selected)
-				{
-					case SelectScreen.None:
-						break;
-					case SelectScreen.First:
-						selected = SelectScreen.None;
-						twoPlayer = false;
-						startIntro = true;
-						break;
-					case SelectScreen.Second:
-						selected = SelectScreen.None;
-						twoPlayer = true;
-						startIntro = true;
-						break;
-				};
-			}
-
-			if (!startIntro)
-			{
-				IntroText = -spriteFont.MeasureString("Pong") * introTextScale / 2;
-				IntroText.Y = -WindowCentre.Y / 1.1f + 64;
-				SpriteBatch.DrawString(spriteFont, "Pong", IntroText + WindowCentre, Color.White, 0f, Vector2.Zero, introTextScale, SpriteEffects.None, 0f);
-
-				SpriteBatch.Draw(rectTexture, centredRectTexture, selected.Equals(SelectScreen.First) ? Color.BurlyWood : Color.Wheat);
-				// Fit the text to the box.
-				var scale = (centredRectTexture.Width - 20) / spriteFont.MeasureString("Player vs AI").X;
-				var stringSize = spriteFont.MeasureString("Player vs AI");
-				// The reason for the '+ 7 * scale' is because the lower text sprites are drawn down from the corner of the position coordinates, doing this makes the capital letters centred
-				SpriteBatch.DrawString(selected.Equals(SelectScreen.First) ? orangeFont : spriteFont, "Player vs AI",
-					new Vector2(centredRectTexture.X + centredRectTexture.Width / 2 - stringSize.X * scale / 2, centredRectTexture.Y + centredRectTexture.Height / 2 + 7 * scale - stringSize.Y * scale / 2),
-					Color.White, 0f, Vector2.Zero, scale, SpriteEffects.None, 0f);
-
-				SpriteBatch.Draw(rectTexture, new Rectangle(centredRectTexture.X, centredRectTexture.Y + 100, centredRectTexture.Width, centredRectTexture.Height), selected.Equals(SelectScreen.Second) ? Color.BurlyWood : Color.Wheat);
-				scale = (centredRectTexture.Width - 20) / spriteFont.MeasureString("Player vs Player").X;
-				stringSize = spriteFont.MeasureString("Player vs Player");
-				SpriteBatch.DrawString(selected.Equals(SelectScreen.Second) ? orangeFont : spriteFont, "Player vs Player",
-					new Vector2(centredRectTexture.X + centredRectTexture.Width / 2 - stringSize.X * scale / 2, centredRectTexture.Y + 100 + centredRectTexture.Height / 2 + 7 * scale - stringSize.Y * scale / 2),
-					Color.White, 0f, Vector2.Zero, scale, SpriteEffects.None, 0f);
-			}
-			else
-			{
-				if (DrawTitleTransition(gameTime, false)) { State = GameState.Game; startIntro = false; };
-			}
-		}
-		private bool DrawTitleTransition(GameTime gameTime, bool inverse)
-		{
-			IntroText.Y = -WindowCentre.Y / 1.1f + 64;
-			if (!inverse)
-			{
-				IntroText.X = Utility.Tween.Instance.TweenTo(IntroText.X, -spriteFont.MeasureString("Pong").X * introTextScale / 2, -Window.ClientBounds.Right, 1, gameTime);
-			}
-			else
-			{
-				IntroText.X = Utility.Tween.Instance.TweenTo(IntroText.X, -Window.ClientBounds.Right, - spriteFont.MeasureString("Pong").X * introTextScale / 2, 1, gameTime);
-			}
-			SpriteBatch.DrawString(spriteFont, "Pong", IntroText + WindowCentre, Color.White, 0f, Vector2.Zero, introTextScale, SpriteEffects.None, 0f);
-
-			return IntroText.X == (-spriteFont.MeasureString("Pong") * introTextScale / 2).X;
-		}
-		private void DrawIntro(GameTime gameTime)
-		{
-			// Draw the intro
-			introTimer += gameTime.ElapsedGameTime.TotalSeconds;
-
-
-			if (_previousKeyboardState.IsKeyDown(Keys.Space) && _currentKeyboardState.IsKeyUp(Keys.Space))
-			{
-				startIntro = true;
-			}
-			if (startIntro)
-			{
-				IntroText.Y = (int)Utility.Tween.Instance.TweenTo(IntroText.Y, -spriteFont.MeasureString("Pong").Y * introTextScale / 2, (int)(-WindowCentre.Y / 1.1f + 64), 0.5f, gameTime);
-				if (IntroText.Y == (int)(-WindowCentre.Y / 1.1f + 64))
-				{ State = GameState.Title; startIntro = false; }
-			}
-			else if ((int)(introTimer) % 2 == 0)
-			{
-				SpriteBatch.DrawString(orangeFont, "Press spacebar to Start...", new Vector2(WindowCentre.X - orangeFont.MeasureString("Press spacebar to Start...").X * 3f / 2, WindowCentre.Y + 175), Color.White, 0f, Vector2.Zero, 3f, SpriteEffects.None, 0f);
-				IntroText = -spriteFont.MeasureString("Pong") * introTextScale / 2;
-			}
-			SpriteBatch.DrawString(spriteFont, "Pong", IntroText + WindowCentre, Color.White, 0f, Vector2.Zero, introTextScale, SpriteEffects.None, 0f);
-		}
-
-
-		private void UpdateScore(GameTime gameTime)
-		{
-
-		}
-
-		private void ResetGame()
-		{
+			stringSize = spriteFont.MeasureString(PlayerTwo.score.ToString()) * titleTextScale;
+			SpriteBatch.DrawString(spriteFont, PlayerTwo.score.ToString(), new Vector2(Window.ClientBounds.Width / 4 * 3 - stringSize.X / 2, stringSize.Y / 4), Color.Tomato, 0f, Vector2.Zero, titleTextScale, SpriteEffects.None, 0f);
 		}
 		
 		private void OpenMenu()
