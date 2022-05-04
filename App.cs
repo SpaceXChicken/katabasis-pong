@@ -41,6 +41,7 @@ namespace Pong
 		private int chosenOption = 0;
 		private double introTimer = 0;
 		private bool startIntro = false;
+		private bool toStart = false;
 		
 		// Game
 		private bool twoPlayer = true;
@@ -196,6 +197,7 @@ namespace Pong
 		private Ball ball = new Ball();
 		private float collisionTimer = 0f;
 		private float spawnTimer = 0f;
+		private bool ballSpawned = false;
 		private Vector2? storedVelocity;
 		private Tuple<Vector2, float>? nextPredictedPositionData;
 		private Tuple<Vector2, float>? finalPredictedPositionData;
@@ -326,13 +328,12 @@ namespace Pong
 			if (KeyPressed(Keys.Space))
 			{
 				startIntro = true;
-				introTimer = 0f;
 			}
 			if (startIntro)
 			{
 				introTimer += gameTime.ElapsedGameTime.TotalSeconds;
 			}
-			if (introTimer > 1)
+			if (introTimer > 0.5)
 			{
 				State = GameState.Title;
 				startIntro = false;
@@ -349,6 +350,8 @@ namespace Pong
 		}
 		private void DrawTitle()
 		{
+			if (startIntro) { return; }
+
 			var textBoxDimensions = new Rectangle(0, 0, rectTexture.Width * textBoxScale, rectTexture.Height * textBoxScale);
 
 			int spacing = textBoxDimensions.Height / 2;
@@ -395,7 +398,8 @@ namespace Pong
 
 			if (KeyPressed(Keys.Escape))
 			{
-				State = GameState.Start;
+				startIntro = true;
+				toStart = true;
 			}
 
 			if (KeyPressed(Keys.Space))
@@ -403,16 +407,27 @@ namespace Pong
 				switch (chosenOption % gameMenu.Length)
 				{
 					case 0:
-						State = GameState.Game;
 						twoPlayer = false;
-						ResetGame();
+						toStart = false;
+						startIntro = true;
 						break;
 					case 1:
-						State = GameState.Game;
 						twoPlayer = true;
-						ResetGame();
+						toStart = false;
+						startIntro = true;
 						break;
 				}
+			}
+			if (startIntro)
+			{
+				introTimer += gameTime.ElapsedGameTime.TotalSeconds;
+			}
+			if (introTimer > 0.5)
+			{
+				ResetGame();
+				State = toStart ? GameState.Start : GameState.Game;
+				startIntro = false;
+				introTimer = 0;
 			}
 		}
 
@@ -421,6 +436,7 @@ namespace Pong
 			PlayerOne = new Player(Window.ClientBounds.Width / 8, Window.ClientBounds.Height / 2 - paddleHeight / 2);
 			PlayerTwo = new Player(Window.ClientBounds.Width * 7 / 8 - paddleWidth, Window.ClientBounds.Height / 2 - paddleHeight / 2);
 			ball.position = WindowCentre;
+			ballSpawned = false;
 			ball.velocity = new Vector2(200, -150);
 			collisionTimer = 0f;
 			spawnTimer = 0f;
@@ -470,9 +486,9 @@ namespace Pong
 				UpdateCollisions(gameTime);
 				UpdateMovement(gameTime);
 			}
-			UpdateMenu();
+			UpdateMenu(gameTime);
 		}
-		private void UpdateMenu()
+		private void UpdateMenu(GameTime gameTime)
 		{
 			if (_previousKeyboardState.IsKeyDown(Keys.Escape) && _currentKeyboardState.IsKeyUp(Keys.Escape)) 
 			{
@@ -492,7 +508,7 @@ namespace Pong
 					switch (chosenOption % gameMenu.Length)
 					{
 						case 0:
-							State = GameState.Title;
+							startIntro = true;
 							CloseMenu();
 							break;
 						case 1:
@@ -500,6 +516,18 @@ namespace Pong
 							break;
 					}
 				}
+			}
+			if (startIntro)
+			{
+				introTimer += gameTime.ElapsedGameTime.TotalSeconds;
+				gamePaused = true;
+			}
+			if (introTimer > 0.5)
+			{
+				gamePaused = false;
+				State = GameState.Title;
+				startIntro = false;
+				introTimer = 0;
 			}
 		}
 
@@ -583,6 +611,13 @@ namespace Pong
 
 		private void HandleBallCollision(GameTime gameTime)
 		{
+			if (!ballSpawned)
+			{
+				SpawnBall(gameTime);
+			}
+
+			if (!ballSpawned) { return; }
+
 			nextPredictedPositionData ??= PredictBallPositionOnPlayerAxis();
 			verticalCollision ??= 0;
 
@@ -592,7 +627,7 @@ namespace Pong
 				verticalCollision = 1;
 			}
 
-			if (ball.position.X < 0 || ball.position.X > Window.ClientBounds.Width)
+			if (ballSpawned && (ball.position.X < 0 || ball.position.X > Window.ClientBounds.Width))
 			{
 				if (ball.velocity.X > 0)
 				{
@@ -609,7 +644,7 @@ namespace Pong
 				{
 					PlayerOne.score++;
 				}
-				SpawnBall(gameTime);
+				ballSpawned = false;
 			}
 
 			collisionTimer += (float)gameTime.ElapsedGameTime.TotalSeconds;
@@ -769,16 +804,16 @@ namespace Pong
 		{
 			storedVelocity ??= ball.velocity;
 
-			ball.position = new Vector2(807, 118); // Apparently negative values break this function.
+			ball.position = WindowCentre;
 			ball.velocity = Vector2.Zero;
 			spawnTimer += (float)gameTime.ElapsedGameTime.TotalSeconds;
 
 			if (spawnTimer > 1)
 			{
 				spawnTimer = 0f;
-				ball.position = WindowCentre;
 				ball.velocity = storedVelocity.Value;
 				storedVelocity = null;
+				ballSpawned = true;
 			}
 		}
 		private void GameOver(GameTime gameTime)
@@ -808,7 +843,7 @@ namespace Pong
 			SpriteBatch.Draw(rectTexture, topBorder.Bounds(), Color.Black);
 			SpriteBatch.Draw(rectTexture, leftBorder.Bounds(), Color.Black);
 			SpriteBatch.Draw(rectTexture, rightBorder.Bounds(), Color.Black);
-			SpriteBatch.Draw(ballTexture, ball.position, Color.White);
+			if (ballSpawned) { SpriteBatch.Draw(ballTexture, ball.position, Color.White); }
 
 			SpriteBatch.Draw(ballTexture, PredictFinalBallPositionOnPlayerAxis().Item1, Color.Purple);
 
