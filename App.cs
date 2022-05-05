@@ -54,6 +54,8 @@ namespace Pong
 		private Tuple<float, double>? aiMovePositionData;
 		private double aiTimer;
 		private bool movingOnlyDown = false;
+		private int bounceCounter = 0;
+		private Random random = new Random();
 
 		// Players
 		// These variables aren't specific to the players
@@ -460,7 +462,7 @@ namespace Pong
 
 				if (!twoPlayer)
 				{
-					SetAIMoveTo(PredictFinalBallPositionOnPlayerAxis().Item1.Y - paddleHeight / 2);
+					AIHitUpdate();
 				}
 			}
 		}
@@ -622,7 +624,24 @@ namespace Pong
 			var time = movingOnlyDown ? (-u + Math.Sqrt(u * u + 2 * a * displacement)) / a : (-u - Math.Sqrt(u * u + 2 * a * displacement)) / a;
 
 			aiMovePositionData = new Tuple<float, double>(nextPosition, time);
-			Console.WriteLine(aiMovePositionData.ToString());
+
+		}
+
+		private void AIHitUpdate()
+		{
+			if (ball.velocity.X > 0)
+			{
+				SetAIMoveTo(PredictFinalBallPositionOnPlayerAxis().Item1.Y - paddleHeight / 2 + GenerateAIOffset(paddleHeight / 2));
+			}
+			else
+			{
+				SetAIMoveTo(PredictFinalBallPositionOnPlayerAxis(PredictFinalBallPositionOnPlayerAxis().Item1, new Vector2(-ball.velocity.X, ball.velocity.Y * (int)Math.Pow(-1, bounceCounter))).Item1.Y - paddleHeight / 2 + GenerateAIOffset(paddleHeight * 2));
+			}
+		}
+		private int GenerateAIOffset(int maxDifferentiation)
+		{
+
+			return random.Next(2 * maxDifferentiation) - random.Next(2 * maxDifferentiation);
 		}
 		private void UpdateCollisions(GameTime gameTime)
 		{
@@ -741,11 +760,14 @@ namespace Pong
 			var borderPos = PredictBallPositionOnBorderAxis(position, velocity);
 			var playerPos = PredictBallPositionOnPlayerAxis(position, velocity);
 
+			bounceCounter = 0;
+
 			if (InRange(borderPos.Item1.X, 0, Window.ClientBounds.Width))
 			{
 				finalPredictedPositionData ??= borderPos;
 				positionData ??= position;
 				velocityData ??= velocity;
+				bounceCounter++;
 			}
 			else
 			{
@@ -754,6 +776,7 @@ namespace Pong
 
 			while (true)
 			{
+				bounceCounter++;
 				var nextBounce = PredictBallPositionOnBorderAxis(positionData.Value, velocityData.Value);
 				if (InRange(nextBounce.Item1.X, PlayerOne.X + paddleWidth, PlayerTwo.X))
 				{
@@ -773,46 +796,6 @@ namespace Pong
 
 			}
 		}
-
-		private List<Vector2> AllBouncePoints(Vector2 position = default, Vector2 velocity = default)
-		{
-			if (position == default) { position = ball.position; velocity = ball.velocity; }
-
-			var borderPos = PredictBallPositionOnBorderAxis(position, velocity);
-			var playerPos = PredictBallPositionOnPlayerAxis(position, velocity);
-
-			List<Vector2> list = new List<Vector2>();
-
-			if (InRange(borderPos.Item1.X, 0, Window.ClientBounds.Width))
-			{
-				finalPredictedPositionData ??= borderPos;
-				positionData ??= position;
-				velocityData ??= velocity;
-			}
-
-			while (true)
-			{
-				var nextBounce = PredictBallPositionOnBorderAxis(positionData.Value, velocityData.Value);
-				if (InRange(nextBounce.Item1.X, PlayerOne.X + paddleWidth, PlayerTwo.X))
-				{
-					positionData = nextBounce.Item1;
-					velocityData = new Vector2(velocityData.Value.X, -velocityData.Value.Y);
-					list.Add((Vector2)positionData);
-					continue;
-				}
-				else
-				{
-					var copy1 = positionData.Value;
-					var copy2 = velocityData.Value;
-					finalPredictedPositionData = null;
-					positionData = null;
-					velocityData = null;
-					return list;
-				}
-
-			}
-		}
-
 		private void SpawnBall(GameTime gameTime)
 		{
 			storedVelocity ??= ball.velocity;
@@ -827,7 +810,7 @@ namespace Pong
 				ball.velocity = storedVelocity.Value;
 				storedVelocity = null;
 				ballSpawned = true;
-				SetAIMoveTo(PredictFinalBallPositionOnPlayerAxis().Item1.Y - paddleHeight / 2);
+				AIHitUpdate();
 			}
 		}
 		private void GameOver(GameTime gameTime)
@@ -860,6 +843,7 @@ namespace Pong
 			if (ballSpawned) { SpriteBatch.Draw(ballTexture, ball.position, Color.White); }
 
 			SpriteBatch.Draw(ballTexture, PredictFinalBallPositionOnPlayerAxis().Item1, Color.Purple);
+			SpriteBatch.Draw(ballTexture, PredictFinalBallPositionOnPlayerAxis(PredictFinalBallPositionOnPlayerAxis().Item1, new Vector2(-ball.velocity.X, ball.velocity.Y * (int)Math.Pow(-1, bounceCounter))).Item1, Color.FloralWhite);
 
 			if (PlayerOne.score >= 15 || PlayerTwo.score >= 15)
 			{
