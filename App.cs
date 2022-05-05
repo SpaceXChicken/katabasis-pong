@@ -51,11 +51,9 @@ namespace Pong
 		private double timer = 0f;
 
 		// AI
-		private float? aiNextPosY;
-		private float? aiTimeToNextPos;
-		private float aiTimer;
-		private Random random = new Random();
-		private int randomOffset;
+		private Tuple<float, double>? aiMovePositionData;
+		private double aiTimer;
+		private bool movingOnlyDown = false;
 
 		// Players
 		// These variables aren't specific to the players
@@ -446,10 +444,7 @@ namespace Pong
 			positionData = null;
 			velocityData = null;
 			verticalCollision = null;
-			aiNextPosY = null;
-			aiTimeToNextPos = null;
 			aiTimer = 0f;
-			randomOffset = random.Next(12);
 		}
 		private void BounceBall(Vector2 colliderVelocity, bool verticalCollision = false)
 		{
@@ -463,13 +458,9 @@ namespace Pong
 			{
 				ball.velocity = new Vector2(-ball.velocity.X, ball.velocity.Y) + colliderVelocity;
 
-				// AI
-				if (!toPlayerTwo)
+				if (!twoPlayer)
 				{
-					aiNextPosY = null;
-					aiTimeToNextPos = null;
-					aiTimer = 0f;
-					randomOffset = random.Next(paddleHeight + 14);
+					SetAIMoveTo(PredictFinalBallPositionOnPlayerAxis().Item1.Y - paddleHeight / 2);
 				}
 			}
 		}
@@ -576,33 +567,62 @@ namespace Pong
 				}
 				else
 				{
-					AIMove(gameTime, PredictFinalBallPositionOnPlayerAxis().Item1.Y);
+					UpdateAI(gameTime);
 				}
 			}
 		}
 
-		private void AIMove(GameTime gameTime, float y)
+		private void UpdateAI(GameTime gameTime)
 		{
-			// s = ut + 0.5at^2  - > 2s/a = t^2
-			var aiPos = PlayerTwo.Y;
-			aiNextPosY ??= y - 14 + randomOffset;
+			if (aiMovePositionData == null) { return; }
+			var aiNextPosition = aiMovePositionData.Item1;
+			var aiTimeToNextPos = aiMovePositionData.Item2;
 
-			float s = (float)aiNextPosY - aiPos;
-			float acc = s > 0 ? accel : -accel;
-			float time = (float)Math.Sqrt(Math.Abs(2 * s / accel));
-
-			aiTimeToNextPos ??= time;
-			aiTimer += (float)gameTime.ElapsedGameTime.TotalSeconds;
-
-			if (aiTimer < aiTimeToNextPos)
+			if (aiTimeToNextPos > aiTimer)
 			{
-				PlayerTwo.curSpeed += acc * (float)gameTime.ElapsedGameTime.TotalSeconds;
-			}
-			else
-			{
-				PlayerTwo.curSpeed = 0f;
+				aiTimer += gameTime.ElapsedGameTime.TotalSeconds;
+
+				if (!movingOnlyDown)
+				{
+					PlayerTwo.AccelerateBy(-accel, gameTime);
+				}
+				else
+				{
+					PlayerTwo.AccelerateBy(accel, gameTime);
+				}
 			}
 
+			if (aiTimer > aiTimeToNextPos)
+			{
+				PlayerTwo.curSpeed = 0;
+				PlayerTwo.Y = (int)aiNextPosition;
+				aiTimer = 0;
+				aiMovePositionData = null;
+			}
+		}
+		private void SetAIMoveTo(float nextPosition)
+		{
+			if (nextPosition < 0)
+			{
+				nextPosition = 0;
+			}
+			else if (nextPosition > Window.ClientBounds.Height - paddleHeight)
+			{
+				nextPosition = Window.ClientBounds.Height - paddleHeight;
+			}
+			// s = ut + 0.5at^2  - > t = (-u + sqrt(u^2 + 2as) / a
+			var displacement = nextPosition - PlayerTwo.Y;
+
+			movingOnlyDown = displacement > 0;
+
+			//var time = Math.Sqrt(Math.Abs(2 * (nextPosition - PlayerTwo.Y) / accel));
+			var a = movingOnlyDown ? accel : -accel;
+			var u = movingOnlyDown ? 50 : -50;
+
+			var time = movingOnlyDown ? (-u + Math.Sqrt(u * u + 2 * a * displacement)) / a : (-u - Math.Sqrt(u * u + 2 * a * displacement)) / a;
+
+			aiMovePositionData = new Tuple<float, double>(nextPosition, time);
+			Console.WriteLine(aiMovePositionData.ToString());
 		}
 		private void UpdateCollisions(GameTime gameTime)
 		{
@@ -629,20 +649,13 @@ namespace Pong
 
 			if (ballSpawned && (ball.position.X < 0 || ball.position.X > Window.ClientBounds.Width))
 			{
-				if (ball.velocity.X > 0)
+				if (ball.velocity.X > 0 && spawnTimer == 0)
 				{
-					aiNextPosY = null;
-					aiTimeToNextPos = null;
-					aiTimer = 0f;
-					randomOffset = random.Next(paddleHeight + 14);
-					if (spawnTimer == 0f)
-					{
-						PlayerTwo.score++;
-					};
+					PlayerOne.score++;
 				}
 				else if (spawnTimer == 0f)
 				{
-					PlayerOne.score++;
+					PlayerTwo.score++;
 				}
 				ballSpawned = false;
 			}
@@ -814,6 +827,7 @@ namespace Pong
 				ball.velocity = storedVelocity.Value;
 				storedVelocity = null;
 				ballSpawned = true;
+				SetAIMoveTo(PredictFinalBallPositionOnPlayerAxis().Item1.Y - paddleHeight / 2);
 			}
 		}
 		private void GameOver(GameTime gameTime)
