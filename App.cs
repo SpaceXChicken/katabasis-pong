@@ -210,11 +210,11 @@ namespace Pong
 		private MouseState _previousMouseState;
 		private KeyboardState _currentKeyboardState;
 		private KeyboardState _previousKeyboardState;
-		
+
 		// Events 
-		private delegate void CollisionEvent(Rectangle body, Rectangle ball);
-		private CollisionEvent OnHit;
-		
+		private delegate void BounceEvent(Vector2 ballVelocity, bool isVerticalCollision);
+		private BounceEvent bounceHandler;
+
 		// Textures
 		private Texture2D paddleTexture;
 		private Texture2D ballTexture;
@@ -223,9 +223,10 @@ namespace Pong
 		SpriteFont spriteFont;
 		SpriteFont orangeFont;
 		
-		// Audio
-		private Song OnHitSong;
-		private Song OnScore;
+		// 2005 Audio - Credits to NoiseCollector from freesound.org
+		private Song borderBounce;
+		private Song playerBounce;
+		private Song playerScores;
 		
 		public App()
 		{
@@ -252,18 +253,27 @@ namespace Pong
 			rightBorder = new Border(Window.ClientBounds.Width - 1, 0, 1, Window.ClientBounds.Height);
 			ball.position = WindowCentre;
 			ball.velocity = new Vector2(200, -150);
+
+			bounceHandler += (Vector2 ballVelocity, bool isVerticalCollision) =>
+			{
+				Console.WriteLine("is working"  + isVerticalCollision);
+				if (isVerticalCollision)
+				{
+					// Play border noise
+					MediaPlayer.Play(borderBounce);
+				}
+				else
+				{
+					// Play paddle noise
+					MediaPlayer.Play(playerBounce);
+				}
+			};
 			base.Initialize();
 		}
 
 		protected override void LoadContent()
 		{
-			LoadSpriteFonts();
-			LoadTextures();
-		}
-		
-		#region ContentHelpers
-		private void LoadSpriteFonts()
-		{
+			// Spritefonts
 			spriteFont = Utility.SpriteFontReader.FromFile("Assets/Alfabeto.png",
 				new Dictionary<char, Vector2>() { { 'm', new Vector2(7, 7) }, { 'w', new Vector2(7, 7) }, { 'q', new Vector2(6, 7) } },
 				new Dictionary<char, Vector2>() { { '!', new Vector2(3, 7) }, { '?', new Vector2(5, 7) }, { ' ', new Vector2(5, 7) } },
@@ -271,16 +281,20 @@ namespace Pong
 			orangeFont = Utility.SpriteFontReader.FromFile("Assets/Alfabeto0.png",
 				new Dictionary<char, Vector2>() { { 'm', new Vector2(7, 7) }, { 'w', new Vector2(7, 7) }, { 'q', new Vector2(6, 7) } },
 				new Dictionary<char, Vector2>() { { '!', new Vector2(3, 7) }, { '?', new Vector2(5, 7) }, { ' ', new Vector2(5, 7) } },
-				new Vector2(5, 7), new Vector2(1, 1), new Vector2(5, 14));			
-		}
-		private void LoadTextures()
-		{
+				new Vector2(5, 7), new Vector2(1, 1), new Vector2(5, 14));
+
+			// Textures
 			paddleTexture = Texture2D.FromFile("Assets/paddle.png");
 			ballTexture = Texture2D.FromFile("Assets/ball.png");
 			rectTexture = Texture2D.FromFile("Assets/rectangle.png");
 			dividerTexture = Texture2D.FromFile("Assets/divider.png");
+
+			// Audio
+			borderBounce = Song.FromFile("borderBounce", "Assets/borderBounce.ogg");
+			playerBounce = Song.FromFile("playerBounce", "Assets/playerBounce.ogg");
+			playerScores = Song.FromFile("playerScores", "Assets/playerScores.ogg");
 		}
-		#endregion
+		
 		
 		protected override void Update(GameTime gameTime)
 		{
@@ -455,6 +469,7 @@ namespace Pong
 			if (verticalCollision)
 			{
 				ball.velocity = new Vector2(ball.velocity.X, -ball.velocity.Y) + colliderVelocity;
+				bounceHandler(ball.velocity, verticalCollision);
 			}
 			else if ( (toPlayerTwo && InRange(ball.position.Y, PlayerTwo.Y, PlayerTwo.Y + paddleHeight)) || (!toPlayerTwo && InRange(ball.position.Y, PlayerOne.Y, PlayerOne.Y + paddleHeight)) )
 			{
@@ -464,6 +479,7 @@ namespace Pong
 				{
 					AIHitUpdate();
 				}
+				bounceHandler(ball.velocity, verticalCollision);
 			}
 		}
 
@@ -668,13 +684,18 @@ namespace Pong
 
 			if (ballSpawned && (ball.position.X < 0 || ball.position.X > Window.ClientBounds.Width))
 			{
-				if (ball.velocity.X > 0 && spawnTimer == 0)
+				if (spawnTimer == 0)
 				{
-					PlayerOne.score++;
-				}
-				else if (spawnTimer == 0f)
-				{
-					PlayerTwo.score++;
+					MediaPlayer.Play(playerScores);
+
+					if (ball.velocity.X > 0)
+					{
+						PlayerOne.score++;
+					}
+					else
+					{
+						PlayerTwo.score++;
+					}
 				}
 				ballSpawned = false;
 			}
