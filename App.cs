@@ -256,7 +256,6 @@ namespace Pong
 
 			bounceHandler += (Vector2 ballVelocity, bool isVerticalCollision) =>
 			{
-				Console.WriteLine("is working"  + isVerticalCollision);
 				if (isVerticalCollision)
 				{
 					// Play border noise
@@ -475,10 +474,7 @@ namespace Pong
 			{
 				ball.velocity = new Vector2(-ball.velocity.X, ball.velocity.Y) + colliderVelocity;
 
-				if (!twoPlayer)
-				{
-					AIHitUpdate();
-				}
+				AIHitUpdate();
 				bounceHandler(ball.velocity, verticalCollision);
 			}
 		}
@@ -592,7 +588,7 @@ namespace Pong
 
 		private void UpdateAI(GameTime gameTime)
 		{
-			if (aiMovePositionData == null) { return; }
+			if (aiMovePositionData == null || twoPlayer) { return; }
 			var aiNextPosition = aiMovePositionData.Item1;
 			var aiTimeToNextPos = aiMovePositionData.Item2;
 
@@ -620,6 +616,7 @@ namespace Pong
 		}
 		private void SetAIMoveTo(float nextPosition)
 		{
+			Console.WriteLine("Set Move Called");
 			if (nextPosition < 0)
 			{
 				nextPosition = 0;
@@ -645,6 +642,7 @@ namespace Pong
 
 		private void AIHitUpdate()
 		{
+			if (twoPlayer) { return; }
 			if (ball.velocity.X > 0)
 			{
 				SetAIMoveTo(PredictFinalBallPositionOnPlayerAxis().Item1.Y - paddleHeight / 2 + GenerateAIOffset(paddleHeight / 2));
